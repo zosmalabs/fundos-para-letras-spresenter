@@ -7,7 +7,7 @@ interface Target {
   output: string; layer: number; elementId: string; title: string; theme: string;
   template: string; text: string; textAlign: string; originalCss: Record<string,string|number>;
 }
-const DEFAULT:Config={enabled:false,preset:'black-soft',color:'#000000',opacity:.55,paddingX:18,paddingY:6,lineGap:0,radius:3,borderEnabled:false,borderColor:'#ffffff',borderOpacity:.5,borderWidth:1};
+const DEFAULT:Config={enabled:true,preset:'black-soft',color:'#000000',opacity:.55,paddingX:18,paddingY:6,lineGap:0,radius:3,borderEnabled:false,borderColor:'#ffffff',borderOpacity:.5,borderWidth:1};
 const PRESETS:Record<string,Partial<Config>>={
   'black-soft':{color:'#000000',opacity:.55,paddingX:18,paddingY:6,radius:3,borderEnabled:false},
   'black-strong':{color:'#000000',opacity:.82,paddingX:20,paddingY:7,radius:2,borderEnabled:false},
@@ -15,6 +15,7 @@ const PRESETS:Record<string,Partial<Config>>={
   'broadcast':{color:'#05080c',opacity:.88,paddingX:22,paddingY:7,radius:1,borderEnabled:false}
 };
 const STORE='zosmalabs-lyrics-background-config-v1';
+const SAVED_STORE='zosmalabs-lyrics-background-saved-v1';
 const LAYOUT_KEYS=['display','width','height','left','top','transform','white-space','box-sizing','background-color',
   'padding-left','padding-right','padding-top','padding-bottom','border-radius','border-style','border-width',
   'border-color','box-decoration-break','-webkit-box-decoration-break'] as const;
@@ -29,15 +30,20 @@ function safe(raw:unknown):Config{const r=(raw&&typeof raw==='object'?raw:{}) as
   borderOpacity:clamp(Number(r.borderOpacity),0,1),borderWidth:clamp(Number(r.borderWidth),0,12)}}
 function escapeHtml(s:string){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function escapeAttr(s:string){return escapeHtml(s)}
+function lineHeight(t:Target){const raw=String(t.originalCss['line-height']??'normal').trim();
+  if(/^\d+(?:\.\d+)?$/.test(raw))return'calc('+raw+'em + '+config.lineGap+'px)';
+  if(/^\d+(?:\.\d+)?(?:px|em|rem|%)$/.test(raw))return'calc('+raw+' + '+config.lineGap+'px)';
+  return'calc(1.2em + '+config.lineGap+'px)'}
 function lineHtml(t:Target){
   const bg=rgba(config.color,config.opacity),bc=rgba(config.borderColor,config.borderOpacity);
   const border=config.borderEnabled?config.borderWidth+'px solid '+bc:'none';
   const lineStyle='display:inline;background:'+bg+';padding:'+config.paddingY+'px '+config.paddingX+'px;border-radius:'+config.radius+'px;border:'+border+';box-decoration-break:clone;-webkit-box-decoration-break:clone;';
   const lines=t.text.replace(/\r\n?/g,'\n').split('\n');
-  const content=lines.map((line,index)=>{const gap=index===lines.length-1?0:config.lineGap;
-    const rowStyle='display:block;width:100%;margin:0 0 '+gap+'px 0;padding:0;border:0;background:transparent;line-height:inherit;text-align:inherit;';
+  const visualLineHeight=lineHeight(t);
+  const content=lines.map(line=>{
+    const rowStyle='display:block;width:100%;margin:0;padding:0;border:0;background:transparent;line-height:'+visualLineHeight+';text-align:inherit;';
     return '<span style="'+escapeAttr(rowStyle)+'"><span style="'+escapeAttr(lineStyle)+'">'+(line?escapeHtml(line):'&nbsp;')+'</span></span>'}).join('');
-  return '<span data-lyrics-background="1" style="display:block;width:100%;background:transparent;margin:0;padding:0;border:0;">'+content+'</span>';
+  return '<span data-lyrics-background="1" style="display:block;width:100%;background:transparent;margin:0;padding:0;border:0;line-height:'+escapeAttr(visualLineHeight)+';">'+content+'</span>';
 }
 function originalLayout(t:Target){const neutral:Record<string,string|number>={
   display:'flex',width:'80%',height:'80%',left:'10%',top:'10%',transform:'none','white-space':'normal','box-sizing':'content-box',
@@ -82,11 +88,27 @@ async function refresh(){
     if(config.enabled)await apply();else pluginStatus='Letra detectada';post()
   }catch(e){pluginStatus='Erro: '+(e instanceof Error?e.message:String(e));post()}
 }
-async function update(raw:unknown){const was=config.enabled;config=safe(raw);await spresenter.storage.set(STORE,config);
+async function update(raw:unknown){const was=config.enabled;config=safe(raw);
   if(was&&!config.enabled)await restore();else if(config.enabled)await refresh();post()}
+async function saveConfig(){
+  try{
+    const saved={...config,enabled:true};
+    await spresenter.storage.set(SAVED_STORE,saved);
+    await spresenter.storage.set(STORE,saved);
+    spresenter.ui.postMessage({type:'save-result',ok:true});
+    pluginStatus='Configuração salva';post();
+  }catch(e){
+    const message=e instanceof Error?e.message:String(e);
+    spresenter.ui.postMessage({type:'save-result',ok:false,message});
+    pluginStatus='Falha ao salvar: '+message;post();
+  }
+}
 spresenter.ui.onmessage=async(raw:unknown)=>{if(!raw||typeof raw!=='object')return;const m=raw as {type?:string;config?:unknown;preset?:string};
   if(m.type==='init'||m.type==='refresh'){await refresh();return}
   if(m.type==='config'){await update(m.config);return}
+  if(m.type==='save'){await saveConfig();return}
   if(m.type==='preset'&&m.preset&&PRESETS[m.preset]){await update({...config,...PRESETS[m.preset],preset:m.preset})}}
 spresenter.on('live',()=>{void refresh();if(timer)clearTimeout(timer);timer=setTimeout(()=>void refresh(),32)});
-void spresenter.storage.get(STORE).then(v=>{config=safe(v);return refresh()}).catch(e=>{pluginStatus=String(e);post()});
+void Promise.all([spresenter.storage.get(SAVED_STORE),spresenter.storage.get(STORE)]).then(async([saved,legacy])=>{
+  config={...safe(saved??legacy),enabled:true};return refresh()
+}).catch(e=>{pluginStatus=String(e);post()});
