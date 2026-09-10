@@ -1,0 +1,14 @@
+{
+  "id": "com.multitracktools.lyrics-background",
+  "name": "Fundo para Letras",
+  "version": "0.3.53",
+  "description": "Fundo individual por linha para letras de músicas ao vivo.",
+  "author": "Multitracktools",
+  "minAppVersion": "0.3.48",
+  "sdk": "0.5.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui/index.html",
+  "permissions": ["outputs:read", "live:read", "live:write"],
+  "panels": [{ "id": "main", "title": "Fundo para Letras", "icon": "puzzle" }],
+  "background": true
+}
