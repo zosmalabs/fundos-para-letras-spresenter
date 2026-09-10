@@ -14,7 +14,7 @@ const PRESETS:Record<string,Partial<Config>>={
   'white-soft':{color:'#ffffff',opacity:.72,paddingX:18,paddingY:6,radius:3,borderEnabled:false},
   'broadcast':{color:'#05080c',opacity:.88,paddingX:22,paddingY:7,radius:1,borderEnabled:false}
 };
-const STORE='lyrics-background-html-config-v1';
+const STORE='zosmalabs-lyrics-background-config-v1';
 const LAYOUT_KEYS=['display','width','height','left','top','transform','white-space','box-sizing','background-color',
   'padding-left','padding-right','padding-top','padding-bottom','border-radius','border-style','border-width',
   'border-color','box-decoration-break','-webkit-box-decoration-break'] as const;
