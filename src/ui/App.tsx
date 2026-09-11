@@ -39,9 +39,9 @@ export function App(){
     <Button block variant={saveFeedback==='saved'?'success':saveFeedback==='error'?'danger':'primary'} disabled={saveFeedback==='saving'} onClick={save}>
       {saveFeedback==='saving'?'Salvando…':saveFeedback==='saved'?'Configuração salva ✓':saveFeedback==='error'?'Tentar salvar novamente':'Salvar configuração'}
     </Button>
-    {saveFeedback==='saved'?<Alert variant="success">Configuração salva. Ela será restaurada na próxima abertura.</Alert>:
+    {saveFeedback==='saved'?<Alert variant="success">Configuração e estado do plugin salvos. Eles serão restaurados na próxima abertura.</Alert>:
       saveFeedback==='error'?<Alert variant="error" detail={saveError}>Não foi possível salvar a configuração.</Alert>:
-      <Alert variant="info">Salve depois de ajustar. A configuração salva será restaurada quando o SPresenter abrir novamente.</Alert>}
+      <Alert variant="info">Salve depois de ajustar. A aparência e o estado ativado ou desativado serão restaurados quando o SPresenter abrir novamente.</Alert>}
     {!state.target&&<Alert variant="info">Coloque uma música ao vivo. O plugin nunca envia conteúdo ao ar por conta própria.</Alert>}
   </Root>;
 }

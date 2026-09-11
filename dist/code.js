@@ -35,7 +35,11 @@
   let pluginStatus = "Iniciando";
   let timer;
   let busy = false;
+  let refreshRunning = false;
+  let refreshQueued = false;
+  let refreshQueuedForce = false;
   let lastSignature = "";
+  let suppressLiveUntil = 0;
   const clamp = (v, min, max) => Math.min(max, Math.max(min, Number.isFinite(v) ? v : min));
   const validColor = (v) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v);
   function rgba(hex, a) {
@@ -161,12 +165,13 @@
     }
     return null;
   }
-  async function apply() {
+  async function apply(force = false) {
     if (!target || busy) return;
     busy = true;
     try {
       const html = lineHtml(target), signature = target.output + "|" + target.layer + "|" + target.elementId + "|" + target.text + "|" + html;
-      if (signature !== lastSignature) {
+      if (force || signature !== lastSignature) {
+        suppressLiveUntil = Date.now() + 160;
         await spresenter.live.setElement(target.output, target.layer, target.elementId, { css: originalLayout(target), html });
         lastSignature = signature;
       }
@@ -188,21 +193,33 @@
       busy = false;
     }
   }
-  async function refresh() {
-    if (busy) return;
+  async function refresh(force = false) {
+    if (refreshRunning) {
+      refreshQueued = true;
+      refreshQueuedForce = refreshQueuedForce || force;
+      return;
+    }
+    refreshRunning = true;
     try {
-      target = await findTarget();
-      if (!target) {
-        pluginStatus = "Nenhuma música ao vivo";
-        post();
-        return;
-      }
-      if (config.enabled) await apply();
-      else pluginStatus = "Letra detectada";
-      post();
-    } catch (e) {
-      pluginStatus = "Erro: " + (e instanceof Error ? e.message : String(e));
-      post();
+      let forceNext = force;
+      do {
+        refreshQueued = false;
+        const forceApply = forceNext || refreshQueuedForce;
+        forceNext = false;
+        refreshQueuedForce = false;
+        try {
+          target = await findTarget();
+          if (!target) pluginStatus = "Nenhuma música ao vivo";
+          else if (config.enabled) await apply(forceApply);
+          else pluginStatus = "Letra detectada";
+          post();
+        } catch (e) {
+          pluginStatus = "Erro: " + (e instanceof Error ? e.message : String(e));
+          post();
+        }
+      } while (refreshQueued);
+    } finally {
+      refreshRunning = false;
     }
   }
   async function update(raw) {
@@ -214,7 +231,7 @@
   }
   async function saveConfig() {
     try {
-      const saved = { ...config, enabled: true };
+      const saved = { ...config };
       await spresenter.storage.set(SAVED_STORE, saved);
       await spresenter.storage.set(STORE, saved);
       spresenter.ui.postMessage({ type: "save-result", ok: true });
@@ -247,12 +264,13 @@
     }
   };
   spresenter.on("live", () => {
+    if (Date.now() < suppressLiveUntil) return;
     void refresh();
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void refresh(), 32);
+    timer = setTimeout(() => void refresh(true), 96);
   });
   void Promise.all([spresenter.storage.get(SAVED_STORE), spresenter.storage.get(STORE)]).then(async ([saved, legacy]) => {
-    config = { ...safe(saved ?? legacy), enabled: true };
+    config = saved ?? legacy ? safe(saved ?? legacy) : { ...DEFAULT };
     return refresh();
   }).catch((e) => {
     pluginStatus = String(e);

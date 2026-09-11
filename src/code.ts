@@ -19,7 +19,9 @@ const SAVED_STORE='zosmalabs-lyrics-background-saved-v1';
 const LAYOUT_KEYS=['display','width','height','left','top','transform','white-space','box-sizing','background-color',
   'padding-left','padding-right','padding-top','padding-bottom','border-radius','border-style','border-width',
   'border-color','box-decoration-break','-webkit-box-decoration-break'] as const;
-let config={...DEFAULT}; let target:Target|null=null; let pluginStatus='Iniciando'; let timer:ReturnType<typeof setTimeout>|undefined; let busy=false; let lastSignature='';
+let config={...DEFAULT}; let target:Target|null=null; let pluginStatus='Iniciando'; let timer:ReturnType<typeof setTimeout>|undefined;
+let busy=false; let refreshRunning=false; let refreshQueued=false; let refreshQueuedForce=false; let lastSignature='';
+let suppressLiveUntil=0;
 const clamp=(v:number,min:number,max:number)=>Math.min(max,Math.max(min,Number.isFinite(v)?v:min));
 const validColor=(v:unknown):v is string=>typeof v==='string'&&/^#[0-9a-f]{6}$/i.test(v);
 function rgba(hex:string,a:number){const n=parseInt(hex.slice(1),16);return 'rgba('+((n>>16)&255)+', '+((n>>8)&255)+', '+(n&255)+', '+clamp(a,0,1)+')'}
@@ -71,10 +73,13 @@ async function findTarget():Promise<Target|null>{
     }
   }return null
 }
-async function apply(){
+async function apply(force=false){
   if(!target||busy)return;busy=true;
   try{const html=lineHtml(target),signature=target.output+'|'+target.layer+'|'+target.elementId+'|'+target.text+'|'+html;
-    if(signature!==lastSignature){await spresenter.live.setElement(target.output,target.layer,target.elementId,{css:originalLayout(target),html});lastSignature=signature}
+    if(force||signature!==lastSignature){
+      suppressLiveUntil=Date.now()+160;
+      await spresenter.live.setElement(target.output,target.layer,target.elementId,{css:originalLayout(target),html});lastSignature=signature
+    }
     pluginStatus='Fundo por linha aplicado';
   }catch(e){pluginStatus='Falha ao aplicar: '+(e instanceof Error?e.message:String(e))}finally{busy=false}
 }
@@ -83,16 +88,30 @@ async function restore(){
   try{await spresenter.live.setElement(target.output,target.layer,target.elementId,{css:originalLayout(target),html:'',text:target.template});lastSignature='';pluginStatus='Fundo desativado'}
   finally{busy=false}
 }
-async function refresh(){
-  if(busy)return;try{target=await findTarget();if(!target){pluginStatus='Nenhuma música ao vivo';post();return}
-    if(config.enabled)await apply();else pluginStatus='Letra detectada';post()
-  }catch(e){pluginStatus='Erro: '+(e instanceof Error?e.message:String(e));post()}
+async function refresh(force=false){
+  if(refreshRunning){refreshQueued=true;refreshQueuedForce=refreshQueuedForce||force;return}
+  refreshRunning=true;
+  try{
+    let forceNext=force;
+    do{
+      refreshQueued=false;
+      const forceApply=forceNext||refreshQueuedForce;
+      forceNext=false;refreshQueuedForce=false;
+      try{
+        target=await findTarget();
+        if(!target)pluginStatus='Nenhuma música ao vivo';
+        else if(config.enabled)await apply(forceApply);
+        else pluginStatus='Letra detectada';
+        post();
+      }catch(e){pluginStatus='Erro: '+(e instanceof Error?e.message:String(e));post()}
+    }while(refreshQueued)
+  }finally{refreshRunning=false}
 }
 async function update(raw:unknown){const was=config.enabled;config=safe(raw);
   if(was&&!config.enabled)await restore();else if(config.enabled)await refresh();post()}
 async function saveConfig(){
   try{
-    const saved={...config,enabled:true};
+    const saved={...config};
     await spresenter.storage.set(SAVED_STORE,saved);
     await spresenter.storage.set(STORE,saved);
     spresenter.ui.postMessage({type:'save-result',ok:true});
@@ -108,7 +127,12 @@ spresenter.ui.onmessage=async(raw:unknown)=>{if(!raw||typeof raw!=='object')retu
   if(m.type==='config'){await update(m.config);return}
   if(m.type==='save'){await saveConfig();return}
   if(m.type==='preset'&&m.preset&&PRESETS[m.preset]){await update({...config,...PRESETS[m.preset],preset:m.preset})}}
-spresenter.on('live',()=>{void refresh();if(timer)clearTimeout(timer);timer=setTimeout(()=>void refresh(),32)});
+spresenter.on('live',()=>{
+  if(Date.now()<suppressLiveUntil)return;
+  void refresh();
+  if(timer)clearTimeout(timer);
+  timer=setTimeout(()=>void refresh(true),96)
+});
 void Promise.all([spresenter.storage.get(SAVED_STORE),spresenter.storage.get(STORE)]).then(async([saved,legacy])=>{
-  config={...safe(saved??legacy),enabled:true};return refresh()
+  config=saved??legacy?safe(saved??legacy):{...DEFAULT};return refresh()
 }).catch(e=>{pluginStatus=String(e);post()});
